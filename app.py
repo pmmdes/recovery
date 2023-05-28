@@ -2,13 +2,15 @@ import numpy as np
 import feather
 import matplotlib.pyplot as plt
 import pandas as pd
-import gc
-import os
-import sys
-import random
 
+import os, psutil
+from os.path import exists
+import gc
+import sys
 import socket
+
 import uuid
+import random
 
 from time import time
 from math import sqrt
@@ -16,8 +18,14 @@ from datetime import datetime
 from numpy import loadtxt
 from PIL import Image
 
+from queue import Queue
+import threading
 
-from os.path import exists
+from time import sleep
+
+#from memory_profiler import profile
+
+PROCESSING_QUEUE = Queue()
 
 erro = 1e-4
 
@@ -36,7 +44,8 @@ def feather_format(path):
 
     object_type = "MODEL" if os.path.split(path)[0][2:] == "Models" else "SIGNAL"
 
-    print(f'[ {object_type} LOADED IN] {end_time - start_time}s')
+    #print(f'[ {object_type} LOADED IN] {end_time - start_time}s')
+    #print(f'[ {object_type} LOADED]')
 
     return file
 
@@ -65,7 +74,7 @@ def cgne(H, g, image):
         break
 
       p_i = np.dot(np.transpose(H), r_i) + beta * p_i
-
+    #print('CPU inside cgne:', psutil.cpu_percent())
     return f_i, i
 
 def cgnr(H, g, image):
@@ -143,37 +152,40 @@ def process_image(info):
 
     requested_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
-    image_size = info["size"]
-
-    # Process
+    # Processing the image
     start_time = time()
     figure, iterations = handle_algortihm(info)
     end_time = time()
 
-    print(f'[PROCESSING] Image processed {iterations + 1} times.')
-    print(f'[PROCESSING] Time spent: {end_time - start_time}')
+    #print(f'[PROCESSING] Image processed {iterations + 1} times.')
+    #print(f'[PROCESSING] Time spent: {end_time - start_time}')
 
+    image_size = info["size"]
     figure = np.reshape(figure, (image_size, image_size), order='F')
 
     process_end = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+    
+    # Creating directory of session
+    ip_formated = info["ip"].replace('.', '')
 
-    name_dir = f'Images/Session-{str(uuid.uuid4())}'
+    name_dir = f'Images/Session-{ip_formated}-{info["sessionId"]}'
     mkdir_p(name_dir)
 
+    # Defining metadata of image
     metadata = {
         'Requestor':f'{info["ip"]}',
         'Description': f'Algorithm: {info["alg"]}',
         'Image size': f'{image_size}px',
         'Requested at:': f'{requested_at}', 
         'Construction time': f'{round(end_time - start_time, 2)}s' ,
-        'Iterations': f'{iterations}'
+        'Iterations': f'{iterations}',
+        'Session ID': f'{info["sessionId"]}'
     }
 
-    plt.imshow(figure, cmap='gray')
-    plt.show()
+    #plt.imshow(figure, cmap='gray')
+    #plt.show()
 
-    ip_formated = info["ip"].replace('.', '')
-
+    # Saving image in session folder
     plt.imsave(f'{name_dir}/{ip_formated}-{str(uuid.uuid4())}.png', figure, metadata=metadata, cmap='gray')
 
     print(f'[PROCESSING] Image saved')
@@ -187,7 +199,7 @@ def getIP():
     ipaddr = socket.gethostbyname(hostname) 
     return ipaddr
 
-def generate_process_request():
+def generate_process_request(sessionId):
 
     info = {
         "size": "",
@@ -196,6 +208,7 @@ def generate_process_request():
         "signal_model": "",
         "signal": "",
         "h_model": "",
+        "sessionId": sessionId
     } 
 
     sizes = [30, 60]
@@ -219,20 +232,74 @@ def generate_process_request():
     info["h_model"] = model
     info["ip"] = getIP()
 
-    return info
-    
-if __name__ == '__main__':
-
-    
-    info = generate_process_request()
-
     g = feather_format(f'./Signals/{info["signal_model"]}')
 
     g = calculate_signal(g)
 
     info["signal"] = g
 
-    process_image(info)
+    return info
+
+def send_random_processes(amount):
+
+    sessionId = str(uuid.uuid4())
+
+    for i in range(amount):
+        PROCESSING_QUEUE.put(generate_process_request(sessionId))
+        sleep(random.randint(2, 8))
+
+# if __name__ == '__main__':
+    
+#     #info = generate_process_request()
+#     sessionId = str(uuid.uuid4())
+
+#     info = {
+#         'size': 30, 
+#         'ip': '192.168.56.1', 
+#         'alg': 'cgne', 
+#         'signal_model': 's30-1', 
+#         'signal': '', 
+#         'h_model': 2,
+#         'sessionId': "a90c7757-1686-4e00-8f71-cbf2d580f08d"
+#     } 
+    
+#     g = feather_format(f'./Signals/{info["signal_model"]}')
+
+#     g = calculate_signal(g)
+
+#     info["signal"] = g
+#     sleep(5)
+
+#     # initial_cpu = psutil.cpu_percent(percpu=True)
+#     # print('CPU initial:', initial_cpu)
+    
+#     process_image(info)
+
+#     # final_cpu = psutil.cpu_percent(percpu=True)
+#     # print('CPU final:', final_cpu)
+#     exit(0)
+
+    ########################################################################
+
+def process_queue():
+    while True:
+        mem = psutil.virtual_memory()
+        free_mem = (mem.available / mem.total) * 100
+        print("Free mem: ", free_mem)
+        if PROCESSING_QUEUE.qsize() > 0 and free_mem > 50:
+            print(f'    [PROCESSING] Current memory usage: {round(100 - free_mem, 2)}%')
+            print(f'    [PROCESSING] Signal found in queue')
+            process_image(PROCESSING_QUEUE.get())
+
+def main():
+
+    print('[PROCESSING] Processing queue initiated.')
+    queue_thread = threading.Thread(target=process_queue, name='Processing Thread')
+    queue_thread.start()
+
+    send_random_processes(2)
 
     exit(0)
 
+if __name__ == '__main__':
+    main()
