@@ -18,6 +18,10 @@ from math import sqrt
 from datetime import datetime
 from time import sleep
 
+import PIL
+from PIL import Image, ImageFile
+
+
 import pickle
 
 SERVER = '127.0.0.1'
@@ -26,6 +30,8 @@ ADDR = (SERVER, PORT)
 FORMAT = "utf-8"
 HEADERSIZE = 10
 DISCONNECT_MESSAGE = "!DISCONNECT"
+
+PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def feather_format(path):
 
@@ -77,9 +83,10 @@ def getIP():
     ipaddr = st.gethostbyname(hostname) 
     return ipaddr
 
-def generate_process_request(sessionId):
+def generate_process_request(sessionId, requestNumber):
 
     info = {
+        "requestNumber": requestNumber,
         "size": "",
         "ip": "",
         "alg": "",
@@ -89,12 +96,14 @@ def generate_process_request(sessionId):
         "sessionId": sessionId
     } 
 
-    sizes = [30, 60]
+    #sizes = [30, 60]
+    sizes = [30]
 
     size_choosed = random.choice(sizes)
 
-    #       s30-1 // s30-2 // s60-1 // s60-2
-    signals = [ f"s{size_choosed}-1", f"s{size_choosed}-2"]
+    #       s30-1 // s30-2 // s30-3 // s60-1 // s60-2 // s60-3
+    #signals = [ f"s{size_choosed}-1", f"s{size_choosed}-2", f"s{size_choosed}-3"]
+    signals = [f"s{size_choosed}-3"]
 
     signal_choosed = random.choice(signals)
 
@@ -118,46 +127,75 @@ def generate_process_request(sessionId):
 
     return info
 
-def send_random_processes(amount):
-
-    sessionId = str(uuid.uuid4())
+def send_random_processes(amount, sessionId):
 
     client = st.socket(st.AF_INET, st.SOCK_STREAM)
     client.connect(ADDR)
 
     for i in range(amount):
-
-        # client = st.socket(st.AF_INET, st.SOCK_STREAM)
-        # client.connect(ADDR)
         
-        msg = pickle_format( generate_process_request(sessionId) )
+        msg = pickle_format( generate_process_request(sessionId, i) )
         client.send(msg)
-        print("Requisição enviada. Aguarde o processamento.")
-        
+        print(f"[CLIENT] Request [{i}] sent, wait for server response.")
+
+        response = b'' + client.recv(1024)
+        response = pickle.loads(response[HEADERSIZE:])
+        if len(response) > 0:
+            print(response)       
 
         sleep(random.randint(2, 8))
 
-    #info = {"disconnect" == DISCONNECT_MESSAGE}
+   
     client.send(pickle_format(DISCONNECT_MESSAGE))
     client.close()
 
+def generate_session_report(dir_path):
+
+    dir_path = dir_path[17:]
+    root_path = r'C:\Users\pedro\OneDrive\Área de Trabalho\utfpr\DIS\recovery\Server\Images'
+
+    dir_path = os.path.join(root_path, dir_path)
+
+    for index, path in enumerate(os.listdir(dir_path)):
+        
+        filename = os.path.join(dir_path, path)
+        
+        im = Image.open(filename)
+        im.load()
+        print(f"\n=================== IMAGE {index} =================== ")
+        print("Requestor: ", im.info['requestor'])
+        print("Algorithm: ", im.info['algorithm'])
+        print("Image Size: ", im.info['image_size'])
+        print("Requested at: ", im.info['requested_at'])
+        print("Construction Time: ", im.info['construction_time'])
+        print("Iterations: ", im.info['iterations'])
+        print("Session ID: ", im.info['sessionId'])
+
 def main():
 
-    send_random_processes(2)
+    sessionId = str(uuid.uuid4())
 
-    # client = st.socket(st.AF_INET, st.SOCK_STREAM)
-    # client.connect(ADDR) 
+    processAmount = random.randint(1, 1)
 
-    # while True:
-    #     #print("Checking for messages")
-    #     data = receive_message(client)
-    
-    #     if len(data) > 0:
-    #         data = pickle.loads(data[HEADERSIZE:])
+    send_random_processes(processAmount, sessionId)
 
-    #         print(data)
+    ip = getIP().replace('.','')
 
-    # exit(0)
+    dir_path = rf'../Server/Images/Session-{ip}-{sessionId}'
+
+    print("[CLIENT] Waiting until all request have been processed.")        
+
+    count = 0
+    while count != processAmount:        
+       
+        if exists(dir_path):            
+            count = len(os.listdir(dir_path))
+
+    print("[CLIENT] All requests has been processed. End of execution.")        
+
+    generate_session_report(dir_path)   
+
+    exit(0)
 
 if __name__ == '__main__':
     main()

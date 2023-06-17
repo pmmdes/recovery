@@ -172,22 +172,22 @@ def process_image(info):
 
     # Defining metadata of image
     metadata = {
-        'Requestor':f'{info["ip"]}',
-        'Description': f'Algorithm: {info["alg"]}',
-        'Image size': f'{image_size}px',
-        'Requested at:': f'{requested_at}', 
-        'Construction time': f'{round(end_time - start_time, 2)}s' ,
-        'Iterations': f'{iterations}',
-        'Session ID': f'{info["sessionId"]}'
+        'requestor':f'{info["ip"]}',
+        'algorithm': f'{info["alg"]}',
+        'image_size': f'{image_size}px',
+        'requested_at': f'{requested_at}', 
+        'construction_time': f'{round(end_time - start_time, 2)}s' ,
+        'iterations': f'{iterations}',
+        'sessionId': f'{info["sessionId"]}'
     }
 
     #plt.imshow(figure, cmap='gray')
     #plt.show()
 
     # Saving image in session folder
-    plt.imsave(f'{name_dir}/{ip_formated}-{str(uuid.uuid4())}.png', figure, metadata=metadata, cmap='gray')
+    plt.imsave(f'{name_dir}/{str(uuid.uuid4())}.png', figure, metadata=metadata, cmap='gray')
 
-    print(f'[PROCESSING] Image saved')
+    print(f'    [PROCESSING] Image from request [{info["requestNumber"]}] saved.')
 
     # Clear memory    
     del figure
@@ -198,18 +198,23 @@ def process_queue():
         mem = psutil.virtual_memory()
         free_mem = (mem.available / mem.total) * 100
         #print("Free mem: ", free_mem)
-        if PROCESSING_QUEUE.qsize() > 0 and free_mem > 50:
-            print(f'    [PROCESSING] Current memory usage: {round(100 - free_mem, 2)}%')
-            print(f'    [PROCESSING] Signal found in queue')
+        if PROCESSING_QUEUE.qsize() > 0 and free_mem > 25:
+            print(f'    [PROCESSING] New process being handled. Current memory usage: {round(100 - free_mem, 2)}%')            
+
             process_image(PROCESSING_QUEUE.get())
             
 
 def handle_info(info, conn):
 
-    print(f'    [PROCESSING] File added into the queue.')
+    print(f'    [PROCESSING] New file added into the queue.')
     PROCESSING_QUEUE.put(info)
 
-    msg = pickle_format("\n[UPDATE] Request putted in the queue.")
+    # Just some status info
+    queue_position = PROCESSING_QUEUE.qsize()
+    requestNumber = info["requestNumber"]
+
+    msg = pickle_format(f"[SERVER] Request [{requestNumber}] putted in the queue. Position: {queue_position}")
+
     conn.send(msg)
 
 def handle_client(conn, addr):
@@ -239,6 +244,7 @@ def handle_client(conn, addr):
                     connected = False
                 else: 
                     #print("tudo certo")
+                    info["port"] = addr[1]
                     handle_info(info, conn)
     conn.close()
     print(f"[CONNECTION] IP: {addr[0]}, Port: {addr[1]} disconnected.")
